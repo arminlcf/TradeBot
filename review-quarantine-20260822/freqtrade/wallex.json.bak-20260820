@@ -1,0 +1,117 @@
+{
+    "$schema": "https://schema.freqtrade.io/schema.json",
+
+    "bot_name": "wallex-usdt-tmn-dryrun",
+    "initial_state": "running",
+    "force_entry_enable": true,
+
+    "max_open_trades": 10,
+
+    "stake_currency": "TMN",
+    "stake_amount": 900000,
+    "tradable_balance_ratio": 0.99,
+    "dry_run_wallet": 1000000,
+
+    "dry_run": false,
+    "cancel_open_orders_on_exit": true,
+
+    "timeframe": "15m",
+
+    "minimal_roi": {
+        "0": 0.05
+    },
+
+    "stoploss": -0.10,
+    "trailing_stop": false,
+
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 10,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+
+    "entry_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+
+    "exit_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+
+    "exchange": {
+        "name": "wallex",
+
+        "key": "REDACTED_WALLEX_API_KEY",
+        "secret": "WALLEX_API_SECRET",
+
+        "ccxt_config": {
+            "enableRateLimit": true
+        },
+
+        "ccxt_async_config": {
+            "enableRateLimit": true
+        },
+
+        "pair_whitelist": [
+            "USDT/TMN"
+        ],
+
+        "pair_blacklist": []
+    },
+
+    "pairlists": [
+        {
+            "method": "StaticPairList"
+        }
+    ],
+
+    "order_types": {
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_entry": "limit",
+        "force_exit": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": false
+    },
+
+    "order_time_in_force": {
+        "entry": "GTC",
+        "exit": "GTC"
+    },
+
+    "strategy": "SampleStrategy",
+
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "127.0.0.1",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+
+        "jwt_secret_key": "REDACTED_JWT_SECRET",
+        "CORS_origins": [],
+
+        "username": "admin",
+        "password": "REDACTED_PASSWORD"
+    },
+
+    "logfile": "/opt/freqtrade/freqtrade.log",
+
+    "db_url": "sqlite:////opt/freqtrade/tradesv3.sqlite",
+
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}
+
