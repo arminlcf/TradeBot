@@ -1,0 +1,9 @@
+node_modules/
+*.pyc
+.env
+keys.json
+*token*
+venv/
+build/ccxt.wiki
+*.pyc
+__pycache__/
