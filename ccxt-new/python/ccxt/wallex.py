@@ -2,7 +2,7 @@
 
 from ccxt.base.exchange import Exchange
 from ccxt.base.decimal_to_precision import DECIMAL_PLACES
-from ccxt.base.errors import AuthenticationError, OrderNotFound, NotSupported
+from ccxt.base.errors import AuthenticationError, OrderNotFound, NotSupported, InvalidOrder
 
 
 class wallex(Exchange):
@@ -66,10 +66,11 @@ class wallex(Exchange):
                         'v1/account/balances',
                         'v1/account/openOrders',
                         'v1/account/orders',
+                        'v1/account/orders/{clientOrderId}',
                         'v1/account/wallets/{asset}'
                     ],
                     'post': ['v1/account/orders', 'v1/account/withdraw', 'v1/account/money-withdrawal'],
-                    'delete': ['v1/account/orders'],
+                    'delete': ['v1/account/orders/{clientOrderId}'],
                 },
             },
             'requiredCredentials': {'apiKey': True, 'secret': False},
@@ -142,18 +143,19 @@ class wallex(Exchange):
 
     def parse_ticker(self, ticker, market=None):
         ts = self.milliseconds()
+        stats = self.safe_value(ticker, 'stats', {})
         return self.safe_ticker({
             'symbol': self.safe_string(market, 'symbol'),
             'timestamp': ts,
             'datetime': self.iso8601(ts),
-            'high': self.safe_number(ticker, '24h_highPrice'),
-            'low': self.safe_number(ticker, '24h_lowPrice'),
-            'bid': self.safe_number(ticker, 'bidPrice'),
-            'ask': self.safe_number(ticker, 'askPrice'),
-            'last': self.safe_number(ticker, 'lastPrice'),
-            'close': self.safe_number(ticker, 'lastPrice'),
-            'baseVolume': self.safe_number(ticker, '24h_volume'),
-            'quoteVolume': self.safe_number(ticker, '24h_quoteVolume'),
+            'high': self.safe_number(stats, '24h_highPrice'),
+            'low': self.safe_number(stats, '24h_lowPrice'),
+            'bid': self.safe_number(stats, 'bidPrice'),
+            'ask': self.safe_number(stats, 'askPrice'),
+            'last': self.safe_number(stats, 'lastPrice'),
+            'close': self.safe_number(stats, 'lastPrice'),
+            'baseVolume': self.safe_number(stats, '24h_volume'),
+            'quoteVolume': self.safe_number(stats, '24h_quoteVolume'),
             'info': ticker
         }, market)
 
@@ -178,7 +180,27 @@ class wallex(Exchange):
         response = self.request('v1/depth', 'public', 'GET', self.extend(request, params))
         result = self.safe_value(response, 'result', {})
         timestamp = self.safe_timestamp(result, 'timestamp') or self.milliseconds()
-        return self.parse_order_book(result, market['symbol'], timestamp, 'bid', 'ask', 'price', 'quantity')
+
+        raw_bids = self.safe_list(result, 'bid', [])
+        raw_asks = self.safe_list(result, 'ask', [])
+
+        bids = []
+        for item in raw_bids:
+            bids.append([self.safe_number(item, 'price'), self.safe_number(item, 'quantity')])
+
+        asks = []
+        for item in raw_asks:
+            asks.append([self.safe_number(item, 'price'), self.safe_number(item, 'quantity')])
+
+        return {
+            'symbol': market['symbol'],
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'bids': bids,
+            'asks': asks,
+            'nonce': None,
+            'info': response,
+        }
 
     def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
         self.load_markets()
@@ -233,40 +255,44 @@ class wallex(Exchange):
 
     def parse_order_status(self, status):
         statuses = {
-            'open': 'open',
-            'active': 'open',
-            'new': 'open',
-            'done': 'closed',
-            'filled': 'closed',
-            'canceled': 'canceled',
-            'cancelled': 'canceled'
+            'OPEN': 'open',
+            'ACTIVE': 'open',
+            'NEW': 'open',
+            'ALL_TRADED': 'closed',
+            'TRADED': 'closed',
+            'DONE': 'closed',
+            'FILLED': 'closed',
+            'FINISHED': 'closed',
+            'CANCELED': 'canceled',
+            'CANCELLED': 'canceled',
+            'REJECTED': 'canceled',
+            'EXPIRED': 'canceled',
         }
-        return statuses.get(status, status)
+        upper_status = status.upper() if isinstance(status, str) else status
+        return statuses.get(upper_status, status)
 
     def parse_order(self, order, market=None):
         ts = self.safe_integer(order, 'transactTime') or self.safe_timestamp(order, 'time')
 
-        # Fallbacks for amount
         amount = self.safe_number(order, 'origQty')
         if amount is None:
             amount = self.safe_number(order, 'quantity')
         if amount is None:
             amount = self.safe_number(order, 'amount')
 
-        # Fallbacks for filled
         filled = self.safe_number(order, 'executedQty')
         if filled is None:
             filled = self.safe_number(order, 'executedQty')
         if filled is None:
             filled = 0
 
-        # Calculate remaining safely
         remaining = amount - filled if amount is not None else None
 
-        # Fallbacks for price
         price = self.safe_number(order, 'price')
         if price is None:
             price = self.safe_number(order, 'avgPrice')
+
+        market_quote = self.safe_string(market, 'quote') if market else None
 
         return self.safe_order({
             'id': self.safe_string(order, 'clientOrderId') or self.safe_string(order, 'id'),
@@ -282,6 +308,11 @@ class wallex(Exchange):
             'amount': amount,
             'filled': filled,
             'remaining': remaining,
+            'fee': {
+                'currency': market_quote,
+                'cost': 0.0,
+                'rate': 0.001,
+            },
         }, market)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
@@ -307,22 +338,19 @@ class wallex(Exchange):
     def fetch_order(self, id, symbol=None, params={}):
         self.load_markets()
         market = self.market(symbol) if symbol else None
-        response = self.request('v1/account/orders', 'private', 'GET', params)
+        request = {'clientOrderId': id}
+        response = self.request('v1/account/orders/{clientOrderId}', 'private', 'GET', self.extend(request, params))
         result = self.safe_value(response, 'result', {})
-        orders = self.safe_value(result, 'orders', []) if isinstance(result, dict) else []
-        for item in orders:
-            item_id = self.safe_string(item, 'clientOrderId') or self.safe_string(item, 'id')
-            if item_id == id:
-                return self.parse_order(item, market)
-        open_orders = self.fetch_open_orders(symbol, params=params)
-        for order in open_orders:
-            if order.get('id') == id:
-                return order
-        raise OrderNotFound(self.id + ' order ' + id + ' not found')
+        return self.parse_order(result, market)
 
     def cancel_order(self, id, symbol=None, params={}):
         request = {'clientOrderId': id}
-        return self.request('v1/account/orders', 'private', 'DELETE', self.extend(request, params))
+        try:
+            response = self.request('v1/account/orders/{clientOrderId}', 'private', 'DELETE',
+                                    self.extend(request, params))
+            return response
+        except Exception as e:
+            raise InvalidOrder(self.id + ' order ' + id + ' could not be canceled (assumed filled/canceled)')
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         self.load_markets()
