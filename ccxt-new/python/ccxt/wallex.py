@@ -100,7 +100,6 @@ class wallex(Exchange):
                 headers['Content-Type'] = 'application/json'
                 body = self.json(query)
         else:
-            # GET and DELETE use querystring
             if query:
                 url += '?' + self.urlencode(query)
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
@@ -159,7 +158,6 @@ class wallex(Exchange):
         }, market)
 
     def fetch_tickers(self, symbols=None, params={}):
-        # Wallex has no batch ticker endpoint
         return {}
 
     def fetch_ticker(self, symbol, params={}):
@@ -180,7 +178,6 @@ class wallex(Exchange):
         response = self.request('v1/depth', 'public', 'GET', self.extend(request, params))
         result = self.safe_value(response, 'result', {})
         timestamp = self.safe_timestamp(result, 'timestamp') or self.milliseconds()
-        # والکس از bid و ask (مفرد) استفاده می‌کند و ساختار دیکشنری دارد
         return self.parse_order_book(result, market['symbol'], timestamp, 'bid', 'ask', 'price', 'quantity')
 
     def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
@@ -238,6 +235,7 @@ class wallex(Exchange):
         statuses = {
             'open': 'open',
             'active': 'open',
+            'new': 'open',
             'done': 'closed',
             'filled': 'closed',
             'canceled': 'canceled',
@@ -247,20 +245,43 @@ class wallex(Exchange):
 
     def parse_order(self, order, market=None):
         ts = self.safe_integer(order, 'transactTime') or self.safe_timestamp(order, 'time')
+
+        # Fallbacks for amount
+        amount = self.safe_number(order, 'origQty')
+        if amount is None:
+            amount = self.safe_number(order, 'quantity')
+        if amount is None:
+            amount = self.safe_number(order, 'amount')
+
+        # Fallbacks for filled
+        filled = self.safe_number(order, 'executedQty')
+        if filled is None:
+            filled = self.safe_number(order, 'executedQty')
+        if filled is None:
+            filled = 0
+
+        # Calculate remaining safely
+        remaining = amount - filled if amount is not None else None
+
+        # Fallbacks for price
+        price = self.safe_number(order, 'price')
+        if price is None:
+            price = self.safe_number(order, 'avgPrice')
+
         return self.safe_order({
             'id': self.safe_string(order, 'clientOrderId') or self.safe_string(order, 'id'),
-            'clientOrderId': None,
+            'clientOrderId': self.safe_string(order, 'clientOrderId'),
             'info': order,
             'timestamp': ts,
-            'datetime': self.iso8601(ts),
+            'datetime': self.iso8601(ts) if ts is not None else None,
             'status': self.parse_order_status(self.safe_string(order, 'status')),
             'symbol': self.safe_string(market, 'symbol'),
             'type': self.safe_string_lower(order, 'type'),
             'side': self.safe_string_lower(order, 'side'),
-            'price': self.safe_number(order, 'price'),
-            'amount': self.safe_number(order, 'origQty') or self.safe_number(order, 'quantity') or self.safe_number(
-                order, 'amount'),
-            'filled': self.safe_number(order, 'executedQty')
+            'price': price,
+            'amount': amount,
+            'filled': filled,
+            'remaining': remaining,
         }, market)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
