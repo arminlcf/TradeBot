@@ -350,6 +350,8 @@ class wallex(Exchange):
                                     self.extend(request, params))
             return response
         except Exception as e:
+            # والکس پیام‌های خطا را به فارسی برمی‌گرداند (مثل "سفارش یافت نشد").
+            # بنابراین، اگر هر اروری در زمان کنسل کردن رخ داد، فرض می‌کنیم سفارش قبلاً پر شده یا کنسل شده است.
             raise InvalidOrder(self.id + ' order ' + id + ' could not be canceled (assumed filled/canceled)')
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
